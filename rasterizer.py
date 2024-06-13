@@ -33,9 +33,11 @@ def draw_roads(roadmap, centered_roadlines, roadlines_ids, roadlines_types, tl_d
     #             if road_id in tl_dict[col]:
     #                 road_color = color_to_rgb[col]
 
+    #         print(roadline.shape)
+
     #         roadmap = cv2.polylines(
     #             roadmap,
-    #             [roadline.astype(int)],
+    #             [roadline.astype(int).reshape(1,1,2)],
     #             False,
     #             road_color
     #         )
@@ -53,18 +55,19 @@ def rasterize_input(agents_arr, bb_npcs, roads):
 
     agents_ids = np.array(list(range(len(XY))),dtype=int)
     unique_agent_ids = agents_ids
-    agents_valid = np.ones(len(XY),dtype=int)
+    #agents_valid = np.ones(len(XY),dtype=int)
 
-    roadlines_ids = np.array(list(range(len(roads))),dtype=int)
-    roadlines_types = np.ones(len(roads),dtype=int)
+    # roadlines_ids = np.array(list(range(len(roads))),dtype=int)
+    # roadlines_types = np.ones(len(roads),dtype=int)
 
+    # For each agent
     for i, (xy,yawvec) in enumerate(zip(XY,YAWS)):
 
-        RES_ROADMAP = np.ones((raster_size, raster_size, 3), dtype=np.uint8) * MAX_PIXEL_VALUE
-        RES_EGO = [np.zeros((raster_size, raster_size, 1), dtype=np.uint8) for _ in range(n_channels)]
-        RES_OTHER = [np.zeros((raster_size, raster_size, 1), dtype=np.uint8) for _ in range(n_channels)]
+        road_map = np.ones((raster_size, raster_size, 3), dtype=np.uint8) * MAX_PIXEL_VALUE
+        ego_map = [np.zeros((raster_size, raster_size, 1), dtype=np.uint8) for _ in range(n_channels)]
+        other_map = [np.zeros((raster_size, raster_size, 1), dtype=np.uint8) for _ in range(n_channels)]
 
-        unscaled_center_xy = 0#xy[-1].reshape(1, -1)
+        unscaled_center_xy = xy[-1].reshape(1, -1)
         center_xy = unscaled_center_xy*zoom_fact
         yawt = yawvec[-1]
         rot_matrix = np.array(
@@ -74,14 +77,19 @@ def rasterize_input(agents_arr, bb_npcs, roads):
             ]
         )
 
-        centered_roadlines = (roads*zoom_fact - center_xy) @ rot_matrix + displacement
+        #centered_roadlines = (roads*zoom_fact - center_xy) @ rot_matrix + displacement
         centered_others = (XY.reshape(-1, 2)*zoom_fact - center_xy) @ rot_matrix + displacement
         centered_others = centered_others.reshape(len(unique_agent_ids), n_channels, 2)
 
-        tl_dict = {"green": set(), "yellow": set(), "red": set()}
+        # tl_dict = {"green": set(), "yellow": set(), "red": set()}
         # tl_dict = get_tl_dict(tl_states_hist[:,-1], tl_ids, tl_valid_hist[:,-1])
 
-        RES_ROADMAP = draw_roads(RES_ROADMAP, centered_roadlines, roadlines_ids, roadlines_types, tl_dict)
+        #road_map = draw_roads(road_map, centered_roadlines, roadlines_ids, roadlines_types, tl_dict)
+
+        for road in roads:
+            road = np.array([[waypoint.transform.location.x, waypoint.transform.location.y] for waypoint in road])
+            road = (road*zoom_fact - center_xy) @ rot_matrix + displacement
+            road_map = cv2.polylines(road_map,[road.astype(int)],False,road_colors[0])
 
         # Agents
         
@@ -97,7 +105,7 @@ def rasterize_input(agents_arr, bb_npcs, roads):
                 is_ego = False
 
             agent_lane = centered_others[agents_ids == other_agent_id][0]
-            agent_valid = agents_valid[agents_ids == other_agent_id]
+            # agent_valid = agents_valid[agents_ids == other_agent_id]
             agent_yaw = YAWS[agents_ids == other_agent_id]
 
             agent_l = lengths[agents_ids == other_agent_id]
@@ -131,7 +139,7 @@ def rasterize_input(agents_arr, bb_npcs, roads):
 
                 _coord = np.array([coord])
                 
-                yawt = yawvec[-1]
+                #yawt = yawvec[-1]
 
                 box_points = (
                     box_points
@@ -149,18 +157,18 @@ def rasterize_input(agents_arr, bb_npcs, roads):
 
                 if is_ego:
                     cv2.fillPoly(
-                        RES_EGO[timestamp],
+                        ego_map[timestamp],
                         box_points,
                         color=MAX_PIXEL_VALUE
                     )
                 else:
                     cv2.fillPoly(
-                        RES_OTHER[timestamp],
+                        other_map[timestamp],
                         box_points,
                         color=MAX_PIXEL_VALUE
                     )
 
-        raster = np.concatenate([RES_ROADMAP] + RES_EGO + RES_OTHER, axis=2)
+        raster = np.concatenate([road_map] + ego_map + other_map, axis=2)
         raster_list.append(raster)
 
     raster = np.array(raster_list)

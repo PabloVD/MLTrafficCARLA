@@ -6,11 +6,14 @@ import numpy as np
 from rasterizer import rasterize_input
 import os
 from roadgraph import RoadGraph
+import torch
 
 if not os.path.exists("testframes/"):
     os.system("mkdir testframes")
 else:
     os.system("rm testframes/*")
+
+device = "cuda"
 
 n_channels = 11
 
@@ -18,6 +21,7 @@ n_channels = 11
 num_npcs = 9
 prev_steps = n_channels
 
+# Set simulation
 client = carla.Client()
 world = client.get_world()
 map = world.get_map()
@@ -53,16 +57,15 @@ agents_buffer_list = [deque(maxlen=prev_steps) for i in range(len(npcs))]
 
 # Road
 roadnet = RoadGraph(world)
-waypoints = roadnet.roadpoints #map.generate_waypoints(0.9)
-roads = np.array([[waypoint.transform.location.x, waypoint.transform.location.y] for waypoint in waypoints])
-print(roads.shape)
+list_roads = roadnet.each_road_waypoints
+
+# Load model
+model = torch.jit.load("model.pt")
+model = model.to(device)
 
 # for npc in npcs:
 #     npc.destroy()
 # exit()
-
-# print(roads[:10])
-# print([[npc.get_transform().location.x, npc.get_transform().location.y] for npc in npcs])
 
 world.tick()
 frame_ind = 0
@@ -76,19 +79,34 @@ try:
 
             # x, y, yaw, length, width
             agents_buffer_list[i].append([transf.location.x, transf.location.y, transf.rotation.yaw])
-            #agents_buffer_list[i].append([transf.location.x, transf.location.y, transf.rotation.yaw, bb.extent.x*2, bb.extent.y*2])
 
+        # (N,timesteps,3)
         agents_arr = np.array(agents_buffer_list)
 
-        if agents_arr.shape[1]==n_channels:
-            
-            raster = rasterize_input(agents_arr, bb_npcs, roads)
-            np.save("testframes/test_"+str(frame_ind),raster[5])
-            print(frame_ind, raster.shape)
-            
+        if agents_arr.shape[1]==n_channels and frame_ind>30:
 
-            # Here will be the model
-            # out = model(raster)
+            # (N,channels,rastersize,rastersize)
+            raster = rasterize_input(agents_arr, bb_npcs, list_roads)
+            np.save("testframes/test_"+str(frame_ind),raster[5])
+            #print(frame_ind, agents_arr.shape, raster.shape)
+            
+            # Run model
+            raster = torch.tensor(raster, device=device, dtype=torch.float32)
+            confidences, logits  = model(raster)
+            #print(confidences.shape, logits.shape)
+
+            
+            # rot_matrix = np.array(
+            # [
+            #     [np.cos(-yaw), -np.sin(-yaw)],
+            #     [np.sin(-yaw), np.cos(-yaw)],
+            # ]
+            # )
+            pred = logits[np.arange(len(logits)),confidences.argmax(axis=1)]
+            
+            #pred = pred@rot_matrix + shift 
+
+            logits[:,]
 
         world.tick()
         frame_ind+=1

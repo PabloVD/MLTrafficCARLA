@@ -8,12 +8,9 @@ class RoadGraph():
         self.map = world.get_map()
         self.topology = self.map.get_topology()
         self.each_road_waypoints = self.generate_road_waypoints()
-        self.roadpoints = []
-
-        for road in self.each_road_waypoints:
-            self.roadpoints.extend(road)
+        self.waypoints = self.map.generate_waypoints(5)
+        self.center = np.array([[waypoint.transform.location.x, waypoint.transform.location.y] for waypoint in self.waypoints]).mean(0)
           
-
     def generate_road_waypoints(self):
         """Return all, precisely located waypoints from the map.
 
@@ -64,28 +61,19 @@ if __name__=="__main__":
     client = carla.Client()
     world = client.get_world()
 
+    roadmap = np.ones((raster_size, raster_size, 3), dtype=np.uint8)*256
+
     roadnet = RoadGraph(world)
-    waypoints = roadnet.roadpoints
-    roads = np.array([[waypoint.transform.location.x, waypoint.transform.location.y] for waypoint in waypoints])
+    waypointslist = roadnet.each_road_waypoints
+    center = roadnet.center
+    
+    for waypoints in waypointslist:
 
-    roadmap = np.ones((raster_size, raster_size, 3), dtype=np.uint8)*256#, dtype=np.uint8)
+        road = np.array([[waypoint.transform.location.x, waypoint.transform.location.y] for waypoint in waypoints])
 
-    roads = roads - roads.mean(0) + displacement
+        road = road - center + displacement
 
-    print(roads.shape)
-
-    #roadmap = cv2.polylines(roadmap,[roads.astype(int).reshape(-1,1,2)],False,(128,128,128))
-    roadmap = cv2.polylines(roadmap,[roads.astype(int)],False,(128,128,128))
-
-    # for road in roads:
-
-    #     road = road.reshape(1,1,2)
-
-    #     roadmap = cv2.polylines(img=roadmap,pts=[road.astype(int)],isClosed=False,color=(128,128,128))
-        
-    print(roadmap.min(), roadmap.max())
-
-    #print(roads)
+        roadmap = cv2.polylines(roadmap,[road.astype(int)],False,(0,0,0))
 
     plt.imshow(roadmap)
 
