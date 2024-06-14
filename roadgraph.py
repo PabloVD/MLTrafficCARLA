@@ -1,4 +1,4 @@
-
+import numpy as np
 
 class RoadGraph():
      
@@ -51,7 +51,6 @@ class RoadGraph():
 if __name__=="__main__":
 
     import carla
-    import numpy as np
     import cv2
     import matplotlib.pyplot as plt
 

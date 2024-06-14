@@ -17,7 +17,7 @@ else:
 
 files = natsorted(glob.glob(inpath+"*"))
 
-for j, file in enumerate(tqdm(files)):
+for j, file in enumerate(tqdm(files[:10])):
 
     raster = np.load(file)
 

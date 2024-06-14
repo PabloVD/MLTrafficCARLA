@@ -40,7 +40,7 @@ npcs = []
 for i in range(num_npcs):
     npc = world.try_spawn_actor(blueprint, spawn_points[i])
     if not npc:
-        print("npc not spawned")
+        print("npc "+str(i)+" not spawned")
     else:
         npc.set_autopilot(True)
         npcs.append( npc )
@@ -88,7 +88,7 @@ try:
             # (N,channels,rastersize,rastersize)
             raster = rasterize_input(agents_arr, bb_npcs, list_roads)
             np.save("testframes/test_"+str(frame_ind),raster[5])
-            #print(frame_ind, agents_arr.shape, raster.shape)
+            print(frame_ind, agents_arr.shape, raster.shape)
             
             # Run model
             raster = torch.tensor(raster, device=device, dtype=torch.float32)
@@ -105,8 +105,6 @@ try:
             pred = logits[np.arange(len(logits)),confidences.argmax(axis=1)]
             
             #pred = pred@rot_matrix + shift 
-
-            logits[:,]
 
         world.tick()
         frame_ind+=1

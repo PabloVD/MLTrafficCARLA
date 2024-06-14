@@ -12,7 +12,7 @@ state_to_color = {1:"red",4:"red",7:"red",2:"yellow",5:"yellow",8:"yellow",3:"gr
 color_to_rgb = { "red":(255,0,0), "yellow":(255,255,0),"green":(0,255,0) }
 
 raster_size = 224
-zoom_fact = 3#1.3
+zoom_fact = 1.3
 n_channels = 11
 
 displacement = np.array([[raster_size // 4, raster_size // 2]])
@@ -47,7 +47,7 @@ def draw_roads(roadmap, centered_roadlines, roadlines_ids, roadlines_types, tl_d
 def rasterize_input(agents_arr, bb_npcs, roads):
 
     XY = agents_arr[:,:,:2]
-    YAWS = agents_arr[:,:,2]
+    YAWS = agents_arr[:,:,2]*np.pi/180.
     lengths = bb_npcs[:,0]
     widths = bb_npcs[:,1]
 
@@ -92,7 +92,7 @@ def rasterize_input(agents_arr, bb_npcs, roads):
             road_map = cv2.polylines(road_map,[road.astype(int)],False,road_colors[0])
 
         # Agents
-        
+
         agent_id = i
 
         is_ego = False
@@ -138,22 +138,14 @@ def rasterize_input(agents_arr, bb_npcs, roads):
                 )
 
                 _coord = np.array([coord])
+
+                rot_matrix = np.array([
+                            [np.cos(yawt - past_yaw), -np.sin(yawt - past_yaw)],
+                            [np.sin(yawt - past_yaw), np.cos(yawt - past_yaw)],
+                        ])
                 
-                #yawt = yawvec[-1]
-
-                box_points = (
-                    box_points
-                    @ np.array(
-                        (
-                            (np.cos(yawt - past_yaw), -np.sin(yawt - past_yaw)),
-                            (np.sin(yawt - past_yaw), np.cos(yawt - past_yaw)),
-                        )
-                    ).reshape(2, 2)
-                )
-
-                box_points = box_points + _coord
+                box_points = box_points @ rot_matrix + _coord
                 box_points = box_points.reshape(1, -1, 2).astype(np.int32)
-
 
                 if is_ego:
                     cv2.fillPoly(
