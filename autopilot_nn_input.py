@@ -15,7 +15,11 @@ else:
 
 device = "cuda"
 
+# True for using NN, otherwise uses standard traffic manager
 use_nn = True
+
+# True for fixed birdview spectator, otherwise follows an agent
+fixed_spec = True
 
 n_channels = 11
 
@@ -75,27 +79,37 @@ frame_ind = 0
 offset = carla.Location(z=2,x=-2)
 
 # Set specator
-spectator = world.get_spectator()
-specloc = carla.Location(z=200)
-specrot = carla.Rotation(pitch=-90)
-spectransf = carla.Transform(location=specloc, rotation=specrot)
-spectator.set_transform(spectransf)
+if fixed_spec:
+    spectator = world.get_spectator()
+    specloc = carla.Location(z=200)
+    specrot = carla.Rotation(pitch=-90)
+    spectransf = carla.Transform(location=specloc, rotation=specrot)
+    spectator.set_transform(spectransf)
+
+# Traffic lights buffer
+traffic_lights = world.get_actors().filter('traffic.traffic_light*')
+tl_buffer_list = [deque(maxlen=prev_steps) for i in range(len(traffic_lights))]
 
 try:
-    while True:
+    while True:  
 
         # Attatch spectator to an actor
-        # spectator = world.get_spectator()
-        # spectransf = npcs[0].get_transform()
-        # spectransf = carla.Transform(location=spectransf.location+offset, rotation=spectransf.rotation)
-        # spectator.set_transform(spectransf)
+        if not fixed_spec:
+            spectator = world.get_spectator()
+            spectransf = npcs[0].get_transform()
+            spectransf = carla.Transform(location=spectransf.location+offset, rotation=spectransf.rotation)
+            spectator.set_transform(spectransf)
 
+        # Get agents information (x, y, yaw)
         for i, npc in enumerate(npcs):
 
             transf = npc.get_transform()
-
-            # x, y, yaw
             agents_buffer_list[i].append([transf.location.x, transf.location.y, transf.rotation.yaw])
+
+        # Get traffic light information
+        for j, tl in enumerate(traffic_lights):
+            transf = tl.get_transform()
+            tl_buffer_list[j].append( [tl.get_state(), transf.location.x, transf.location.y] )
 
         # (N,timesteps,3)
         agents_arr = np.array(agents_buffer_list)
