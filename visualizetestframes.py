@@ -15,7 +15,7 @@ if not os.path.exists(outpath):
 else:
     os.system("rm "+outpath+"*")
 
-files = natsorted(glob.glob(inpath+"*"))
+files = natsorted(glob.glob(inpath+"test_*"))
 
 for j, file in enumerate(tqdm(files[:10])):
 

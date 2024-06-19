@@ -2,8 +2,9 @@ import numpy as np
 
 class RoadGraph():
      
-    def __init__(self, world):
-            
+    def __init__(self, world, precision = 0.5):
+        
+        self.precision = precision
         self.world = world
         self.map = world.get_map()
         self.topology = self.map.get_topology()
@@ -20,7 +21,6 @@ class RoadGraph():
 
         Returns a list of waypoints for each road segment.
         """
-        precision: Meters = 2#0.05
         road_segments_starts: carla.Waypoint = [
             road_start for road_start, road_end in self.topology
         ]
@@ -30,14 +30,14 @@ class RoadGraph():
             road_waypoints = [road_start_waypoint]
 
             # Generate as long as it's the same road
-            next_waypoints = road_start_waypoint.next(precision)
+            next_waypoints = road_start_waypoint.next(self.precision)
 
             if len(next_waypoints) > 0:
                 # Always take first (may be at intersection)
                 next_waypoint = next_waypoints[0]
                 while next_waypoint.road_id == road_start_waypoint.road_id:
                     road_waypoints.append(next_waypoint)
-                    next_waypoint = next_waypoint.next(precision)
+                    next_waypoint = next_waypoint.next(self.precision)
 
                     if len(next_waypoint) > 0:
                         next_waypoint = next_waypoint[0]

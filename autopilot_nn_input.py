@@ -15,6 +15,8 @@ else:
 
 device = "cuda"
 
+use_nn = True
+
 n_channels = 11
 
 #--- Constants
