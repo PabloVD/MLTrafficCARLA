@@ -72,48 +72,86 @@ model = model.to(device)
 world.tick()
 frame_ind = 0
 
+offset = carla.Location(z=2,x=-2)
+
+# Set specator
+spectator = world.get_spectator()
+specloc = carla.Location(z=200)
+specrot = carla.Rotation(pitch=-90)
+spectransf = carla.Transform(location=specloc, rotation=specrot)
+spectator.set_transform(spectransf)
+
 try:
     while True:
+
+        # Attatch spectator to an actor
+        # spectator = world.get_spectator()
+        # spectransf = npcs[0].get_transform()
+        # spectransf = carla.Transform(location=spectransf.location+offset, rotation=spectransf.rotation)
+        # spectator.set_transform(spectransf)
 
         for i, npc in enumerate(npcs):
 
             transf = npc.get_transform()
 
-            # x, y, yaw, length, width
+            # x, y, yaw
             agents_buffer_list[i].append([transf.location.x, transf.location.y, transf.rotation.yaw])
 
         # (N,timesteps,3)
         agents_arr = np.array(agents_buffer_list)
 
-        if agents_arr.shape[1]==n_channels and frame_ind>30:
+        if agents_arr.shape[1]==n_channels and frame_ind>20:
 
             # (N,channels,rastersize,rastersize)
             raster = rasterize_input(agents_arr, bb_npcs, list_roads)
-            np.save("testframes/test_"+str(frame_ind),raster[5])
+            np.save("testframes/test_"+str(frame_ind),raster[0])
             print(frame_ind, agents_arr.shape, raster.shape)
             
             # Run model
             raster = torch.tensor(raster, device=device, dtype=torch.float32)
             confidences, logits  = model(raster)
-            #print(confidences.shape, logits.shape)
+            # print(confidences.shape, logits.shape)
 
+            #currpos, yaw = agents_arr[:,-1,:2], agents_arr[:,-1,2]
             
-            # rot_matrix = np.array(
-            # [
-            #     [np.cos(-yaw), -np.sin(-yaw)],
-            #     [np.sin(-yaw), np.cos(-yaw)],
-            # ]
-            # )
-            pred = logits[np.arange(len(logits)),confidences.argmax(axis=1)]
+            # TO DO improve with array multiplication
+
+            for j in range(len(agents_arr)):
+
+                pred = logits[j,confidences[j].argmax()].detach().cpu().numpy()
+
+                currpos, yaw = agents_arr[j,-1,:2], agents_arr[j,-1,2]*np.pi/180.
+
+                rot_matrix = np.array([
+                    [np.cos(-yaw), -np.sin(-yaw)],
+                    [np.sin(-yaw), np.cos(-yaw)],
+                ])
             
-            #pred = pred@rot_matrix + shift 
+                pred = pred@rot_matrix + currpos 
+
+                if use_nn:
+
+                    nextpos =  pred[0]
+
+                    # Estimate orientation
+                    diffpos = nextpos - currpos
+                    newyaw = np.arctan2(diffpos[1],diffpos[0])*180./np.pi
+                    
+                    nextloc = carla.Location(x=nextpos[0],y=nextpos[1])
+                    nextrot = carla.Rotation(yaw=newyaw)
+
+                    npcs[j].set_transform(carla.Transform(location=nextloc,rotation=nextrot))
+
+                np.save("testframes/prev_"+str(j)+"_"+str(frame_ind),agents_arr[j,:,:2])
+                np.save("testframes/pred_"+str(j)+"_"+str(frame_ind),pred)
 
         world.tick()
         frame_ind+=1
 
 finally:
-    for npc in npcs:
-        npc.destroy()
-
-
-
+    vehicles = world.get_actors().filter('vehicle.*')
+    for vehicle in vehicles:
+        vehicle.destroy()
+    # for npc in npcs:
+    #     npc.destroy()
+    
