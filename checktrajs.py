@@ -56,7 +56,7 @@ for it, j in enumerate(tqdm(range(21,maxframe))):
 
         prev = prev - center + displacement
         pred = pred - center + displacement
-        pred = pred[:10]
+        pred = pred[:6]
 
         plt.scatter(prev[:,0],prev[:,1],color="b",s=5,alpha=0.7)
         plt.scatter(pred[:,0],pred[:,1],color="r",s=5,alpha=0.7)

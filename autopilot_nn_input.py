@@ -7,6 +7,7 @@ from rasterizer import rasterize_input
 import os
 from roadgraph import RoadGraph
 import torch
+from controller import VehiclePIDController
 
 if not os.path.exists("testframes/"):
     os.system("mkdir testframes")
@@ -18,10 +19,16 @@ device = "cuda"
 # True for using NN, otherwise uses standard traffic manager
 use_nn = True
 
+# If True, uses PID to update position, otherwise teleports the vehicle
+use_pid = False
+
 # True for fixed birdview spectator, otherwise follows an agent
 fixed_spec = True
 
 n_channels = 11
+
+# Timestep, 10Hz as Waymo data (do not modify)
+dt = 0.1
 
 #--- Constants
 num_npcs = 9
@@ -29,11 +36,12 @@ prev_steps = n_channels
 
 # Set simulation
 client = carla.Client()
+#client.load_world("Town03")
 world = client.get_world()
 map = world.get_map()
 settings = world.get_settings()
 settings.synchronous_mode = True
-settings.fixed_delta_seconds = 0.1  # 10Hz as Waymo data
+settings.fixed_delta_seconds = dt
 world.apply_settings(settings)
 traffic_manager = client.get_trafficmanager()
 traffic_manager.set_synchronous_mode(True)
@@ -76,12 +84,12 @@ model = model.to(device)
 world.tick()
 frame_ind = 0
 
-offset = carla.Location(z=2,x=-2)
+spec_offset = carla.Location(z=2,x=-2)
 
-# Set specator
+# Set spectator
 if fixed_spec:
     spectator = world.get_spectator()
-    specloc = carla.Location(z=200)
+    specloc = carla.Location(z=220)
     specrot = carla.Rotation(pitch=-90)
     spectransf = carla.Transform(location=specloc, rotation=specrot)
     spectator.set_transform(spectransf)
@@ -90,6 +98,40 @@ if fixed_spec:
 traffic_lights = world.get_actors().filter('traffic.traffic_light*')
 tl_buffer_list = [deque(maxlen=prev_steps) for i in range(len(traffic_lights))]
 
+# PID controllers
+args_lateral_dict = {'K_P': 0., 'K_I': 0.05, 'K_D': 0.2, 'dt': dt}
+args_longitudinal_dict = {'K_P': 1.0, 'K_I': 0.05, 'K_D': 0, 'dt': dt}
+controllers = []
+for npc in npcs:
+    vehicle_controller = VehiclePIDController(npc,
+                                            args_lateral=args_lateral_dict,
+                                            args_longitudinal=args_longitudinal_dict,
+                                            offset=0,
+                                            max_throttle=0.75,
+                                            max_brake=0.5,
+                                            max_steering=0.8)
+    controllers.append(vehicle_controller)
+
+class CustomWaypoint():
+    def __init__(self, pos):
+        self.transform = carla.Transform(location=carla.Location(x=pos[0],y=pos[1]))
+
+# Deactivate some layers for debugging
+map_layer_names = [
+            carla.MapLayer.Buildings,
+            carla.MapLayer.Decals,
+            carla.MapLayer.Foliage,
+            carla.MapLayer.ParkedVehicles,
+            carla.MapLayer.Props,
+            carla.MapLayer.StreetLights,
+            carla.MapLayer.Walls,
+        ]
+
+for layer in map_layer_names:
+    world.unload_map_layer(layer)
+
+print("Running with",len(npcs),"agents, total vehicles in simulation:", len(world.get_actors().filter('vehicle.*')))
+
 try:
     while True:  
 
@@ -97,7 +139,7 @@ try:
         if not fixed_spec:
             spectator = world.get_spectator()
             spectransf = npcs[0].get_transform()
-            spectransf = carla.Transform(location=spectransf.location+offset, rotation=spectransf.rotation)
+            spectransf = carla.Transform(location=spectransf.location+spec_offset, rotation=spectransf.rotation)
             spectator.set_transform(spectransf)
 
         # Get agents information (x, y, yaw)
@@ -129,7 +171,6 @@ try:
             #currpos, yaw = agents_arr[:,-1,:2], agents_arr[:,-1,2]
             
             # TO DO improve with array multiplication
-
             for j in range(len(agents_arr)):
 
                 pred = logits[j,confidences[j].argmax()].detach().cpu().numpy()
@@ -144,17 +185,30 @@ try:
                 pred = pred@rot_matrix + currpos 
 
                 if use_nn:
-
-                    nextpos =  pred[0]
-
-                    # Estimate orientation
-                    diffpos = nextpos - currpos
-                    newyaw = np.arctan2(diffpos[1],diffpos[0])*180./np.pi
                     
-                    nextloc = carla.Location(x=nextpos[0],y=nextpos[1])
-                    nextrot = carla.Rotation(yaw=newyaw)
+                    if use_pid:
+                        # Apply PID controller
 
-                    npcs[j].set_transform(carla.Transform(location=nextloc,rotation=nextrot))
+                        #target_vel = diffpos/dt
+                        target_vel = (pred[1]-currpos)/(2.*dt)
+                        target_speed = np.sqrt( target_vel[0]**2. + target_vel[1]**2. )
+                        next_wp = CustomWaypoint(pred[0])
+                        control = controllers[j].run_step(target_speed, next_wp)
+                        npcs[j].apply_control(control)
+
+                    else:
+                        # Displace directly the vehicle to the predicted position
+
+                        nextpos =  pred[0]
+
+                        # Estimate orientation
+                        diffpos = nextpos - currpos
+                        newyaw = np.arctan2(diffpos[1], diffpos[0])*180./np.pi
+                        
+                        nextloc = carla.Location(x=nextpos[0], y=nextpos[1])
+                        nextrot = carla.Rotation(yaw=newyaw)
+
+                        npcs[j].set_transform(carla.Transform(location=nextloc, rotation=nextrot))
 
                 np.save("testframes/prev_"+str(j)+"_"+str(frame_ind),agents_arr[j,:,:2])
                 np.save("testframes/pred_"+str(j)+"_"+str(frame_ind),pred)
