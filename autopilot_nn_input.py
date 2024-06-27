@@ -14,6 +14,10 @@ if not os.path.exists("testframes/"):
 else:
     os.system("rm testframes/*")
 
+class CustomWaypoint():
+    def __init__(self, pos):
+        self.transform = carla.Transform(location=carla.Location(x=pos[0],y=pos[1]))
+
 device = "cuda"
 
 # True for using NN, otherwise uses standard traffic manager
@@ -39,6 +43,7 @@ client = carla.Client()
 #client.load_world("Town03")
 world = client.get_world()
 map = world.get_map()
+blueprint_library = world.get_blueprint_library()
 settings = world.get_settings()
 settings.synchronous_mode = True
 settings.fixed_delta_seconds = dt
@@ -48,7 +53,7 @@ traffic_manager.set_synchronous_mode(True)
 
 # Spawn npcs
 spawn_points = map.get_spawn_points()
-blueprint_list = world.get_blueprint_library().filter("*audi*")
+blueprint_list = blueprint_library.filter("*audi*")
 blueprint = blueprint_list[0]
 npcs = []
 for i in range(num_npcs):
@@ -74,15 +79,12 @@ roadnet = RoadGraph(world)
 list_roads = roadnet.each_road_waypoints
 
 # Load model
-model = torch.jit.load("model.pt")
+model = torch.jit.load("models/model.pt")
 model = model.to(device)
 
 # for npc in npcs:
 #     npc.destroy()
 # exit()
-
-world.tick()
-frame_ind = 0
 
 spec_offset = carla.Location(z=2,x=-2)
 
@@ -93,6 +95,11 @@ if fixed_spec:
     specrot = carla.Rotation(pitch=-90)
     spectransf = carla.Transform(location=specloc, rotation=specrot)
     spectator.set_transform(spectransf)
+
+# Set camera
+camera_bp = blueprint_library.find('sensor.camera.rgb')
+camera = world.spawn_actor(camera_bp, carla.Transform(carla.Location(x=50)), attach_to=spectator)
+camera.listen(lambda image: image.save_to_disk('_out/%06d.png' % image.frame))
 
 # Traffic lights buffer
 traffic_lights = world.get_actors().filter('traffic.traffic_light*')
@@ -112,10 +119,6 @@ for npc in npcs:
                                             max_steering=0.8)
     controllers.append(vehicle_controller)
 
-class CustomWaypoint():
-    def __init__(self, pos):
-        self.transform = carla.Transform(location=carla.Location(x=pos[0],y=pos[1]))
-
 # Deactivate some layers for debugging
 map_layer_names = [
             carla.MapLayer.Buildings,
@@ -131,6 +134,12 @@ for layer in map_layer_names:
     world.unload_map_layer(layer)
 
 print("Running with",len(npcs),"agents, total vehicles in simulation:", len(world.get_actors().filter('vehicle.*')))
+
+min_frame = 100
+run_nn = False
+
+world.tick()
+frame_ind = 0
 
 try:
     while True:  
@@ -156,7 +165,15 @@ try:
         # (N,timesteps,3)
         agents_arr = np.array(agents_buffer_list)
 
-        if agents_arr.shape[1]==n_channels and frame_ind>20:
+        if not run_nn and use_nn and agents_arr.shape[1]==n_channels and frame_ind>min_frame:
+            print("Disabling traffic manager, switching to neural traffic")
+            # for npc in npcs:
+            #     npc.set_autopilot(False)
+            #     control = carla.VehicleControl(steer=0., throttle=0., brake=1.0, hand_brake = False, manual_gear_shift = False)
+            #     npc.apply_control(control)
+            run_nn = True
+
+        if run_nn:
 
             # (N,channels,rastersize,rastersize)
             raster = rasterize_input(agents_arr, bb_npcs, list_roads)
