@@ -18,13 +18,18 @@ class CustomWaypoint():
     def __init__(self, pos):
         self.transform = carla.Transform(location=carla.Location(x=pos[0],y=pos[1]))
 
+def get_closest_waypoint(pos):
+    loc = carla.Location(x=pos[0],y=pos[1])
+    wp = map.get_waypoint(loc, project_to_road=True, lane_type=(carla.LaneType.Driving))
+    return wp
+
 device = "cuda"
 
 # True for using NN, otherwise uses standard traffic manager
 use_nn = True
 
 # If True, uses PID to update position, otherwise teleports the vehicle
-use_pid = False
+use_pid = True
 
 # True for fixed birdview spectator, otherwise follows an agent
 fixed_spec = True
@@ -77,9 +82,13 @@ agents_buffer_list = [deque(maxlen=prev_steps) for i in range(len(npcs))]
 # Road
 roadnet = RoadGraph(world)
 list_roads = roadnet.each_road_waypoints
+# list_wps = []
+# for road in list_roads:
+#     list_wps.extend(road)
+# list_wps = [ [wp.x, wp.y] for wp in list_wps]
 
 # Load model
-model = torch.jit.load("models/model.pt")
+model = torch.jit.load("models/model0.pt")
 model = model.to(device)
 
 # for npc in npcs:
@@ -97,9 +106,9 @@ if fixed_spec:
     spectator.set_transform(spectransf)
 
 # Set camera
-camera_bp = blueprint_library.find('sensor.camera.rgb')
-camera = world.spawn_actor(camera_bp, carla.Transform(carla.Location(x=50)), attach_to=spectator)
-camera.listen(lambda image: image.save_to_disk('_out/%06d.png' % image.frame))
+# camera_bp = blueprint_library.find('sensor.camera.rgb')
+# camera = world.spawn_actor(camera_bp, carla.Transform(carla.Location(x=50)), attach_to=spectator)
+# camera.listen(lambda image: image.save_to_disk('_out/%06d.png' % image.frame))
 
 # Traffic lights buffer
 traffic_lights = world.get_actors().filter('traffic.traffic_light*')
@@ -209,7 +218,8 @@ try:
                         #target_vel = diffpos/dt
                         target_vel = (pred[1]-currpos)/(2.*dt)
                         target_speed = np.sqrt( target_vel[0]**2. + target_vel[1]**2. )
-                        next_wp = CustomWaypoint(pred[0])
+                        next_wp = get_closest_waypoint(pred[0])
+                        #next_wp = CustomWaypoint(pred[0])
                         control = controllers[j].run_step(target_speed, next_wp)
                         npcs[j].apply_control(control)
 
