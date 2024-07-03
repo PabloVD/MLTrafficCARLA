@@ -9,10 +9,12 @@ from roadgraph import RoadGraph
 import torch
 from controller import VehiclePIDController
 
-if not os.path.exists("testframes/"):
-    os.system("mkdir testframes")
+outpath = "testframes/"
+
+if not os.path.exists(outpath):
+    os.system("mkdir "+outpath)
 else:
-    os.system("rm testframes/*")
+    os.system("rm "+outpath+"*")
 
 class CustomWaypoint():
     def __init__(self, pos):
@@ -29,7 +31,7 @@ device = "cuda"
 use_nn = True
 
 # If True, uses PID to update position, otherwise teleports the vehicle
-use_pid = True
+use_pid = False
 
 # True for fixed birdview spectator, otherwise follows an agent
 fixed_spec = True
@@ -88,7 +90,7 @@ list_roads = roadnet.each_road_waypoints
 # list_wps = [ [wp.x, wp.y] for wp in list_wps]
 
 # Load model
-model = torch.jit.load("models/model0.pt")
+model = torch.jit.load("models/model7.pt")
 model = model.to(device)
 
 # for npc in npcs:
@@ -142,13 +144,13 @@ map_layer_names = [
 for layer in map_layer_names:
     world.unload_map_layer(layer)
 
-print("Running with",len(npcs),"agents, total vehicles in simulation:", len(world.get_actors().filter('vehicle.*')))
-
 min_frame = 100
 run_nn = False
 
 world.tick()
 frame_ind = 0
+
+print("Running with",len(npcs),"agents, total vehicles in simulation:", len(world.get_actors().filter('vehicle.*')))
 
 try:
     while True:  
@@ -237,8 +239,8 @@ try:
 
                         npcs[j].set_transform(carla.Transform(location=nextloc, rotation=nextrot))
 
-                np.save("testframes/prev_"+str(j)+"_"+str(frame_ind),agents_arr[j,:,:2])
-                np.save("testframes/pred_"+str(j)+"_"+str(frame_ind),pred)
+                np.save("testframes/prev_{:d}_{:03d}".format(j, frame_ind),agents_arr[j,:,:2])
+                np.save("testframes/pred_{:d}_{:03d}".format(j, frame_ind),pred)
 
         world.tick()
         frame_ind+=1

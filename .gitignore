@@ -4,3 +4,4 @@ __pycache__/
 videos/
 trajectories/
 trajectories_tm/
+models/

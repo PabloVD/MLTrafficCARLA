@@ -2,11 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import glob
 from natsort import natsorted
-import carla
 import cv2
 from roadgraph import RoadGraph
 from tqdm import tqdm
 import os
+
+get_roadmap = False
 
 outpath = "trajectories/"
 
@@ -15,36 +16,47 @@ if not os.path.exists(outpath):
 else:
     os.system("rm "+outpath+"*")
 
-# Map
-raster_size = 224
+raster_size = 256
 displacement = np.array([[raster_size // 2, raster_size // 2]])
 
-client = carla.Client()
-world = client.get_world()
+# Map
+if get_roadmap:
 
-roadmap = np.ones((raster_size, raster_size, 3), dtype=np.uint8)*256
+    import carla
 
-roadnet = RoadGraph(world)
-waypointslist = roadnet.each_road_waypoints
-center = roadnet.center
+    client = carla.Client()
+    world = client.get_world()
 
-for waypoints in waypointslist:
+    roadmap = np.ones((raster_size, raster_size, 3), dtype=np.uint8)*256
 
-    road = np.array([[waypoint.transform.location.x, waypoint.transform.location.y] for waypoint in waypoints])
+    roadnet = RoadGraph(world)
+    waypointslist = roadnet.each_road_waypoints
+    center = roadnet.center
 
-    road = road - center + displacement
+    for waypoints in waypointslist:
 
-    roadmap = cv2.polylines(roadmap,[road.astype(int)],False,(0,0,0))
+        road = np.array([[waypoint.transform.location.x, waypoint.transform.location.y] for waypoint in waypoints])
 
-maxframe = len(glob.glob("testframes/prev_0_*.npy"))-1
+        road = road - center + displacement
 
-# Agents
-npcs = 9
+        roadmap = cv2.polylines(roadmap,[road.astype(int)],False,(0,0,0))
 
-for it, j in enumerate(tqdm(range(21,maxframe))):
+    np.save("roadmap",roadmap)
+    np.save("center_roadmap",center)
 
-    prevfil = natsorted(glob.glob("testframes/prev_*"+str(j)+".npy"))
-    predfil = natsorted(glob.glob("testframes/pred_*"+str(j)+".npy"))
+else:
+    roadmap = np.load("roadmap.npy")
+    center = np.load("center_roadmap.npy")
+
+roadmap = roadmap.transpose(1,0,2)
+
+min_frame = 100
+max_frame = len(glob.glob("testframes/prev_0_*.npy"))-1
+
+for it, j in enumerate(tqdm(range(min_frame+1,min_frame+max_frame))):
+
+    prevfil = natsorted(glob.glob("testframes/prev_*_{:03d}.npy".format(j)))
+    predfil = natsorted(glob.glob("testframes/pred_*_{:03d}.npy".format(j)))
 
     plt.figure(figsize=(6,6),constrained_layout=True)
     plt.imshow(roadmap.astype(float)/256,alpha=0.5)
@@ -58,8 +70,8 @@ for it, j in enumerate(tqdm(range(21,maxframe))):
         pred = pred - center + displacement
         pred = pred[:6]
 
-        plt.scatter(prev[:,0],prev[:,1],color="b",s=5,alpha=0.7)
-        plt.scatter(pred[:,0],pred[:,1],color="r",s=5,alpha=0.7)
+        plt.scatter(prev[:,1],prev[:,0],color="b",s=5,alpha=0.7)
+        plt.scatter(pred[:,1],pred[:,0],color="r",s=5,alpha=0.7)
 
     plt.xlim(0,raster_size)
     plt.ylim(0,raster_size)
