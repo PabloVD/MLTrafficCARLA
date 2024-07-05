@@ -10,6 +10,7 @@ class RoadGraph():
         self.topology = self.map.get_topology()
         self.each_road_waypoints = self.generate_road_waypoints()
         self.center = self.get_center()
+        self.tl_lanes = None
 
 
     def get_center(self):
@@ -74,7 +75,9 @@ class RoadGraph():
 
             tl_lanes.append(np.unique(affected_lanes))
 
-        return tl_lanes
+        self.tl_lanes = tl_lanes
+
+        return self.tl_lanes
     
 
 if __name__=="__main__":

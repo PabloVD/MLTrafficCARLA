@@ -1,12 +1,11 @@
 from collections import deque
 import matplotlib.pyplot as plt
-#from birdview2waymo import BirdviewBuffer
 import carla
 import numpy as np
-from rasterizer import rasterize_input
 import os
-from roadgraph import RoadGraph
 import torch
+from rasterizer import rasterize_input
+from roadgraph import RoadGraph
 from controller import VehiclePIDController
 
 
@@ -85,16 +84,15 @@ def main():
     # Create buffer with previous steps info
     agents_buffer_list = [deque(maxlen=prev_steps) for i in range(len(npcs))]
 
+    # Traffic lights
+    traffic_lights = world.get_actors().filter('traffic.traffic_light*')
+
     # Road
     roadnet = RoadGraph(world)
-    list_roads = roadnet.each_road_waypoints
-    # list_wps = []
-    # for road in list_roads:
-    #     list_wps.extend(road)
-    # list_wps = [ [wp.x, wp.y] for wp in list_wps]
+    roadnet.get_tl_lanes(traffic_lights)
 
     # Load model
-    model = torch.jit.load("models/model7.pt")
+    model = torch.jit.load("models/model8.pt")
     model = model.to(device)
 
     # for npc in npcs:
@@ -115,11 +113,6 @@ def main():
     # camera_bp = blueprint_library.find('sensor.camera.rgb')
     # camera = world.spawn_actor(camera_bp, carla.Transform(carla.Location(x=50)), attach_to=spectator)
     # camera.listen(lambda image: image.save_to_disk('_out/%06d.png' % image.frame))
-
-    # Traffic lights buffer
-    traffic_lights = world.get_actors().filter('traffic.traffic_light*')
-    #tl_buffer_list = [deque(maxlen=prev_steps) for i in range(len(traffic_lights))]
-    tl_lanes = roadnet.get_tl_lanes(traffic_lights)
 
     # PID controllers
     args_lateral_dict = {'K_P': 0., 'K_I': 0.05, 'K_D': 0.2, 'dt': dt}
@@ -177,7 +170,7 @@ def main():
             # for j, tl in enumerate(traffic_lights):
             #     transf = tl.get_transform()
             #     tl_buffer_list[j].append( [tl.get_state(), transf.location.x, transf.location.y] )
-            tl_cols = [ tl.get_state() for tl in traffic_lights ]
+            tl_states = [ tl.get_state() for tl in traffic_lights ]
 
             # (N,timesteps,3)
             agents_arr = np.array(agents_buffer_list)
@@ -193,7 +186,7 @@ def main():
             if run_nn:
 
                 # (N,channels,rastersize,rastersize)
-                raster = rasterize_input(agents_arr, bb_npcs, list_roads)
+                raster = rasterize_input(agents_arr, bb_npcs, roadnet, tl_states)
                 np.save("testframes/test_"+str(frame_ind),raster[0])
                 print(frame_ind, agents_arr.shape, raster.shape)
                 
