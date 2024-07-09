@@ -4,4 +4,4 @@ Data-driven traffic generator based on the deep learning models from [this repo]
 
 To use it, start a CARLA simulation and run `python3 autopilot_nn_input.py`.
 
-[Road](road.png)
+![Road](road.png)
