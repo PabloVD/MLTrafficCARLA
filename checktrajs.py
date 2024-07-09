@@ -50,7 +50,7 @@ else:
 
 roadmap = roadmap.transpose(1,0,2)
 
-min_frame = 100
+min_frame = 15
 max_frame = len(glob.glob("testframes/prev_0_*.npy"))-1
 
 for it, j in enumerate(tqdm(range(min_frame+1,min_frame+max_frame))):

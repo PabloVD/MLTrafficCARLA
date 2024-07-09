@@ -17,23 +17,38 @@ else:
 
 files = natsorted(glob.glob(inpath+"test_*"))
 
-for j, file in enumerate(tqdm(files[:10])):
 
+def raster2rgb(raster, i):
+
+    road = raster[:,:,0:3]
+    img = np.copy(road)
+    ego = raster[:,:,3+i]
+    others = raster[:,:,3+11+i]
+
+    ego = ego[:,:,None]
+    others = others[:,:,None]
+
+    zeros = np.zeros_like(ego)
+    ego_pos = np.concatenate([ego,ego,ego],axis=-1)
+    ego = np.concatenate([zeros,zeros,ego],axis=-1)
+    others_pos = np.concatenate([others,others,others],axis=-1)
+    others = np.concatenate([zeros,others,zeros],axis=-1)/2.
+
+    img[ego_pos!=0]=ego[ego_pos!=0]
+    img[others_pos!=0]=others[others_pos!=0]
+
+    return img
+
+
+for j, file in enumerate(tqdm(files)):
     raster = np.load(file)
+    raster = raster.transpose(1, 2, 0)
 
-    for i in range(n_channels):
+    #for i in range(n_channels):
+    for i in [10]:
 
-        rast = raster[0:3].transpose(1, 2, 0).mean(-1)
-        rast += raster[3+i]/2. + raster[3+11+i]  
-        
-        plt.imshow(rast)
+        img = raster2rgb(raster, i)
+
+        plt.imshow(img)
 
         plt.savefig(outpath+"im_"+str(j)+"_"+str(i)+".png")
-
-    # i = 10
-    # rast = raster[0:3].transpose(1, 2, 0).mean(-1)
-    # rast += raster[3+i]/2. + raster[3+11+i]  
-    
-    # plt.imshow(rast)
-
-    # plt.savefig(outpath+"im_"+str(j)+".png")

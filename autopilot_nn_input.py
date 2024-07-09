@@ -4,10 +4,18 @@ import carla
 import numpy as np
 import os
 import torch
+import argparse
+
 from rasterizer import rasterize_input
 from roadgraph import RoadGraph
 from controller import VehiclePIDController
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m", type=str, required=True, help="Model name")
+    parser.add_argument("-npcs", type=int, required=False, help="Number of NPCs", default=9)
+    args = parser.parse_args()
+    return args
 
 class CustomWaypoint():
     def __init__(self, pos):
@@ -20,6 +28,8 @@ def get_closest_waypoint(pos):
 
 
 def main():
+
+    args = parse_args()
 
     outpath = "testframes/"
 
@@ -39,14 +49,14 @@ def main():
     # True for fixed birdview spectator, otherwise follows an agent
     fixed_spec = True
 
-    n_channels = 11
+    # Number of previous timeframes taken as input
+    prev_steps = 11
 
     # Timestep, 10Hz as Waymo data (do not modify)
     dt = 0.1
 
-    #--- Constants
-    num_npcs = 9
-    prev_steps = n_channels
+    # Number of NPCs
+    num_npcs = args.npcs
 
     # Set simulation
     client = carla.Client()
@@ -71,6 +81,7 @@ def main():
         if not npc:
             print("npc "+str(i)+" not spawned")
         else:
+            # Set Autopilot from standard Traffic Manager for initialization
             npc.set_autopilot(True)
             npcs.append( npc )
 
@@ -92,7 +103,7 @@ def main():
     roadnet.get_tl_lanes(traffic_lights)
 
     # Load model
-    model = torch.jit.load("models/model8.pt")
+    model = torch.jit.load("models/"+args.m+".pt")
     model = model.to(device)
 
     # for npc in npcs:
@@ -142,7 +153,10 @@ def main():
     for layer in map_layer_names:
         world.unload_map_layer(layer)
 
-    min_frame = 100
+    # Frame when to switch to NN traffic manager
+    min_frame = 15
+
+    # Flag to use NN (False for initialization)
     run_nn = False
 
     world.tick()
@@ -165,27 +179,24 @@ def main():
 
                 transf = npc.get_transform()
                 agents_buffer_list[i].append([transf.location.x, transf.location.y, transf.rotation.yaw])
-
-            # Get traffic light information
-            # for j, tl in enumerate(traffic_lights):
-            #     transf = tl.get_transform()
-            #     tl_buffer_list[j].append( [tl.get_state(), transf.location.x, transf.location.y] )
-            tl_states = [ tl.get_state() for tl in traffic_lights ]
-
-            # (N,timesteps,3)
+                
+            # agents_arr: (N,timesteps,3)
             agents_arr = np.array(agents_buffer_list)
 
-            if not run_nn and use_nn and agents_arr.shape[1]==n_channels and frame_ind>min_frame:
+            # Get traffic light information
+            tl_states = [ tl.get_state() for tl in traffic_lights ]
+
+            if not run_nn and use_nn and agents_arr.shape[1]==prev_steps and frame_ind>min_frame:
                 print("Disabling traffic manager, switching to neural traffic")
-                # for npc in npcs:
-                #     npc.set_autopilot(False)
+                for npc in npcs:
+                    npc.set_autopilot(False)
                 #     control = carla.VehicleControl(steer=0., throttle=0., brake=1.0, hand_brake = False, manual_gear_shift = False)
                 #     npc.apply_control(control)
                 run_nn = True
 
             if run_nn:
 
-                # (N,channels,rastersize,rastersize)
+                # raster: (N,channels,rastersize,rastersize)
                 raster = rasterize_input(agents_arr, bb_npcs, roadnet, tl_states)
                 np.save("testframes/test_"+str(frame_ind),raster[0])
                 print(frame_ind, agents_arr.shape, raster.shape)
@@ -248,9 +259,7 @@ def main():
         vehicles = world.get_actors().filter('vehicle.*')
         for vehicle in vehicles:
             vehicle.destroy()
-        # for npc in npcs:
-        #     npc.destroy()
-    
+
 
 if __name__=="__main__":
 
