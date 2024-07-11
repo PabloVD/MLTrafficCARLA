@@ -47,7 +47,7 @@ def main():
     use_pid = False
 
     # True for fixed birdview spectator, otherwise follows an agent
-    fixed_spec = False
+    fixed_spec = True
 
     # Number of previous timeframes taken as input
     prev_steps = 11

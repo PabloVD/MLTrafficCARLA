@@ -17,7 +17,7 @@ else:
 
 files = natsorted(glob.glob(inpath+"test_*"))
 
-
+# raster expected in shape (imgsize,imgsize,channels)
 def raster2rgb(raster, i):
 
     road = raster[:,:,0:3]
@@ -42,6 +42,7 @@ def raster2rgb(raster, i):
 
 for j, file in enumerate(tqdm(files)):
     raster = np.load(file)
+    #raster = raster.transpose(2, 1, 0) 
     raster = raster.transpose(1, 2, 0)
 
     #for i in range(n_channels):
@@ -50,5 +51,6 @@ for j, file in enumerate(tqdm(files)):
         img = raster2rgb(raster, i)
 
         plt.imshow(img)
+        plt.axis('off')
 
-        plt.savefig(outpath+"im_"+str(j)+"_"+str(i)+".png")
+        plt.savefig(outpath+"im_"+str(j)+"_"+str(i)+".png", bbox_inches='tight')
