@@ -21,7 +21,7 @@ class CustomWaypoint():
     def __init__(self, pos):
         self.transform = carla.Transform(location=carla.Location(x=pos[0],y=pos[1]))
 
-def get_closest_waypoint(pos):
+def get_closest_waypoint(pos, map):
     loc = carla.Location(x=pos[0],y=pos[1])
     wp = map.get_waypoint(loc, project_to_road=True, lane_type=(carla.LaneType.Driving))
     return wp
@@ -47,13 +47,16 @@ def main():
     use_pid = False
 
     # True for fixed birdview spectator, otherwise follows an agent
-    fixed_spec = True
+    fixed_spec = False
 
     # Number of previous timeframes taken as input
     prev_steps = 11
 
     # Timestep, 10Hz as Waymo data (do not modify)
     dt = 0.1
+
+    # True for debugging, saves some debugging files and prints more information
+    debug = True
 
     # Number of NPCs
     num_npcs = args.npcs
@@ -77,7 +80,9 @@ def main():
     blueprint = blueprint_list[0]
     npcs = []
     for i in range(num_npcs):
-        npc = world.try_spawn_actor(blueprint, spawn_points[i])
+        spwnpnt = spawn_points[i]
+        #spwnpnt.location.x-=2
+        npc = world.try_spawn_actor(blueprint, spwnpnt)
         if not npc:
             print("npc "+str(i)+" not spawned")
         else:
@@ -103,7 +108,7 @@ def main():
     roadnet.get_tl_lanes(traffic_lights)
 
     # Load model
-    model = torch.jit.load("models/"+args.m+".pt")
+    model = torch.jit.load(args.m+".pt")
     model = model.to(device)
 
     # for npc in npcs:
@@ -188,18 +193,21 @@ def main():
 
             if not run_nn and use_nn and agents_arr.shape[1]==prev_steps and frame_ind>min_frame:
                 print("Disabling traffic manager, switching to neural traffic")
+                run_nn = True
                 for npc in npcs:
                     npc.set_autopilot(False)
-                #     control = carla.VehicleControl(steer=0., throttle=0., brake=1.0, hand_brake = False, manual_gear_shift = False)
-                #     npc.apply_control(control)
-                run_nn = True
+                    control = carla.VehicleControl(steer=0., throttle=0., brake=1.0, hand_brake = False, manual_gear_shift = False)
+                    npc.apply_control(control)
 
             if run_nn:
 
                 # raster: (N,channels,rastersize,rastersize)
                 raster = rasterize_input(agents_arr, bb_npcs, roadnet, tl_states)
-                np.save("testframes/test_"+str(frame_ind),raster[0])
-                print(frame_ind, agents_arr.shape, raster.shape)
+                if debug:
+                    np.save("testframes/test_"+str(frame_ind),raster[0])
+                    # np.save("testframes/allagents_"+str(frame_ind),raster)
+                    np.save("testframes/tlstates_"+str(frame_ind),[str(tl) for tl in tl_states])
+                    print(frame_ind, agents_arr.shape, raster.shape)
                 
                 # Run model
                 raster = torch.tensor(raster, device=device, dtype=torch.float32)
@@ -211,7 +219,11 @@ def main():
                 # TO DO improve with array multiplication
                 for j in range(len(agents_arr)):
 
-                    pred = logits[j,confidences[j].argmax()].detach().cpu().numpy()
+                    indmax = confidences[j].argmax()
+                    # sortedtens, indices = torch.sort(confidences[j])
+                    # indmax = indices[-2]
+
+                    pred = logits[j,indmax].detach().cpu().numpy()
 
                     currpos, yaw = agents_arr[j,-1,:2], agents_arr[j,-1,2]*np.pi/180.
 
@@ -222,6 +234,11 @@ def main():
                 
                     pred = pred@rot_matrix + currpos 
 
+                    # Store data and prediction for debugging
+                    if debug:
+                        np.save("testframes/prev_{:d}_{:03d}".format(j, frame_ind),agents_arr[j,:,:2])
+                        np.save("testframes/pred_{:d}_{:03d}".format(j, frame_ind),pred)
+
                     if use_nn:
                         
                         if use_pid:
@@ -230,7 +247,7 @@ def main():
                             #target_vel = diffpos/dt
                             target_vel = (pred[1]-currpos)/(2.*dt)
                             target_speed = np.sqrt( target_vel[0]**2. + target_vel[1]**2. )
-                            next_wp = get_closest_waypoint(pred[0])
+                            next_wp = get_closest_waypoint(pred[0], map)
                             #next_wp = CustomWaypoint(pred[0])
                             control = controllers[j].run_step(target_speed, next_wp)
                             npcs[j].apply_control(control)
@@ -243,14 +260,18 @@ def main():
                             # Estimate orientation
                             diffpos = nextpos - currpos
                             newyaw = np.arctan2(diffpos[1], diffpos[0])*180./np.pi
+
+                            # if np.sqrt(diffpos[0]**2.+diffpos[1]**2.)<0.01:
+                            #     continue
+
+                            # wp = get_closest_waypoint(nextpos, map)
+                            # nextpos = [ wp.transform.location.x, wp.transform.location.y ]
                             
                             nextloc = carla.Location(x=nextpos[0], y=nextpos[1])
                             nextrot = carla.Rotation(yaw=newyaw)
 
                             npcs[j].set_transform(carla.Transform(location=nextloc, rotation=nextrot))
 
-                    np.save("testframes/prev_{:d}_{:03d}".format(j, frame_ind),agents_arr[j,:,:2])
-                    np.save("testframes/pred_{:d}_{:03d}".format(j, frame_ind),pred)
 
             world.tick()
             frame_ind+=1

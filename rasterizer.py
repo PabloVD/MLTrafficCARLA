@@ -137,7 +137,6 @@ def rasterize_input(agents_arr, bb_npcs, roadnet, tl_states):
         raster_list.append(raster)
 
     raster = np.array(raster_list)
-    
     raster = raster.transpose(0, 3, 2, 1) / 255
 
     return raster

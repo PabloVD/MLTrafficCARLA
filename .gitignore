@@ -5,3 +5,5 @@ videos/
 trajectories/
 trajectories_tm/
 models/
+allagents/
+trajectories_best/

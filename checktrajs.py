@@ -44,9 +44,17 @@ if get_roadmap:
     np.save("roadmap",roadmap)
     np.save("center_roadmap",center)
 
+    # Traffic lights
+    traffic_lights = world.get_actors().filter('traffic.traffic_light*')
+    tl_locs = [ [tl.get_transform().location.x, tl.get_transform().location.y] for tl in traffic_lights]
+    np.save("tl_locs",tl_locs)
+
 else:
     roadmap = np.load("roadmap.npy")
-    center = np.load("center_roadmap.npy")
+    center = np.load("center_roadmap.npy")    
+    tl_locs = np.load("tl_locs.npy")
+
+tl_locs = tl_locs - center + displacement
 
 roadmap = roadmap.transpose(1,0,2)
 
@@ -57,6 +65,9 @@ for it, j in enumerate(tqdm(range(min_frame+1,min_frame+max_frame))):
 
     prevfil = natsorted(glob.glob("testframes/prev_*_{:03d}.npy".format(j)))
     predfil = natsorted(glob.glob("testframes/pred_*_{:03d}.npy".format(j)))
+    tlstates = natsorted(glob.glob("testframes/tlstates_*.npy"))
+
+    #print(tlstates)
 
     plt.figure(figsize=(6,6),constrained_layout=True)
     plt.imshow(roadmap.astype(float)/256,alpha=0.5)
@@ -72,6 +83,10 @@ for it, j in enumerate(tqdm(range(min_frame+1,min_frame+max_frame))):
 
         plt.scatter(prev[:,1],prev[:,0],color="b",s=5,alpha=0.7)
         plt.scatter(pred[:,1],pred[:,0],color="r",s=5,alpha=0.7)
+
+    tl_state = np.load(tlstates[j])
+
+    plt.scatter(tl_locs[:,1],tl_locs[:,0],color=tl_state,s=20,alpha=0.5)
 
     plt.xlim(0,raster_size)
     plt.ylim(0,raster_size)
