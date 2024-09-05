@@ -50,7 +50,10 @@ def main():
     fixed_spec = True
 
     # Number of previous timeframes taken as input
-    prev_steps = 11
+    prev_steps = 10
+
+    # Zoom factor
+    zoom_fact = 3#1.3
 
     # Timestep, 10Hz as Waymo data (do not modify)
     dt = 0.1
@@ -108,6 +111,7 @@ def main():
     roadnet.get_tl_lanes(traffic_lights)
 
     # Load model
+    print("Using model",args.m)
     model = torch.jit.load(args.m+".pt")
     model = model.to(device)
 
@@ -159,7 +163,7 @@ def main():
         world.unload_map_layer(layer)
 
     # Frame when to switch to NN traffic manager
-    min_frame = 15
+    min_frame = 100
 
     # Flag to use NN (False for initialization)
     run_nn = False
@@ -202,7 +206,7 @@ def main():
             if run_nn:
 
                 # raster: (N,channels,rastersize,rastersize)
-                raster = rasterize_input(agents_arr, bb_npcs, roadnet, tl_states)
+                raster = rasterize_input(agents_arr, bb_npcs, roadnet, tl_states, prev_steps, zoom_fact)
                 if debug:
                     np.save("testframes/test_"+str(frame_ind),raster[0])
                     # np.save("testframes/allagents_"+str(frame_ind),raster)

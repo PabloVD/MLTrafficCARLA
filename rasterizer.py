@@ -7,12 +7,10 @@ MAX_PIXEL_VALUE = 255
 color_to_rgb = { "Red":(255,0,0), "Yellow":(255,255,0),"Green":(0,255,0) }
 
 raster_size = 224
-zoom_fact = 1.3
-n_channels = 11
 
 displacement = np.array([[raster_size // 4, raster_size // 2]])
 
-def rasterize_input(agents_arr, bb_npcs, roadnet, tl_states):
+def rasterize_input(agents_arr, bb_npcs, roadnet, tl_states, n_channels, zoom_fact):
 
     XY = agents_arr[:,:,:2]
     YAWS = agents_arr[:,:,2]*np.pi/180.
