@@ -26,6 +26,37 @@ def get_closest_waypoint(pos, map):
     wp = map.get_waypoint(loc, project_to_road=True, lane_type=(carla.LaneType.Driving))
     return wp
 
+def update_agents(agents_arr, confidences, logits):
+
+        # Extract batch size
+        batch_size = agents_arr.shape[0]
+
+        arr = torch.arange(batch_size)
+        
+        # Get the index of the maximum confidence for each row in the batch
+        indmax_batch = confidences.argmax(dim=1)
+        
+        # Gather the logits based on the indices obtained from the maximum confidences
+        pred = logits[arr, indmax_batch]
+        
+        # Get current position and yaw
+        currpos = agents_arr[:,-1,:2]
+        curryaw = agents_arr[:,-1,2]*np.pi/180.
+        
+        # Calculate rotation matrix for each batch
+        rot_matrix = get_rotation_matrix(-curryaw)
+        
+        # Rotating and translating prediction
+        pred_rotated = torch.bmm(pred, rot_matrix) + currpos.unsqueeze(1)  # shape: (batch_size, 10, 2)
+        
+        # Displace directly the vehicle to the predicted position
+        nextpos = pred_rotated[:, 0]  # Take the first position from the prediction
+        
+        # Estimate orientation
+        diffpos = nextpos - currpos
+        newyaw = torch.atan2(diffpos[:, 1], diffpos[:, 0])
+
+        return nextpos, newyaw
 
 def main():
 
@@ -219,62 +250,77 @@ def main():
                 # print(confidences.shape, logits.shape)
 
                 #currpos, yaw = agents_arr[:,-1,:2], agents_arr[:,-1,2]
-                
-                # TO DO improve with array multiplication
+
+                nextpos, nextyaw = update_agents(agents_arr, confidences, logits)
+
                 for j in range(len(agents_arr)):
-
-                    indmax = confidences[j].argmax()
-                    # sortedtens, indices = torch.sort(confidences[j])
-                    # indmax = indices[-2]
-
-                    pred = logits[j,indmax].detach().cpu().numpy()
-
-                    currpos, yaw = agents_arr[j,-1,:2], agents_arr[j,-1,2]*np.pi/180.
-
-                    rot_matrix = np.array([
-                        [np.cos(-yaw), -np.sin(-yaw)],
-                        [np.sin(-yaw), np.cos(-yaw)],
-                    ])
-                
-                    pred = pred@rot_matrix + currpos 
 
                     # Store data and prediction for debugging
                     if debug:
                         np.save("testframes/prev_{:d}_{:03d}".format(j, frame_ind),agents_arr[j,:,:2])
                         np.save("testframes/pred_{:d}_{:03d}".format(j, frame_ind),pred)
 
-                    if use_nn:
+                    nextloc = carla.Location(x=nextpos[0], y=nextpos[1])
+                    nextrot = carla.Rotation(yaw=nextyaw)
+
+                    npcs[j].set_transform(carla.Transform(location=nextloc, rotation=nextrot))
+
+                
+                # # TO DO improve with array multiplication
+                # for j in range(len(agents_arr)):
+
+                #     indmax = confidences[j].argmax()
+                #     # sortedtens, indices = torch.sort(confidences[j])
+                #     # indmax = indices[-2]
+
+                #     pred = logits[j,indmax].detach().cpu().numpy()
+
+                #     currpos, yaw = agents_arr[j,-1,:2], agents_arr[j,-1,2]*np.pi/180.
+
+                #     rot_matrix = np.array([
+                #         [np.cos(-yaw), -np.sin(-yaw)],
+                #         [np.sin(-yaw), np.cos(-yaw)],
+                #     ])
+                
+                #     pred = pred@rot_matrix + currpos 
+
+                #     # Store data and prediction for debugging
+                #     if debug:
+                #         np.save("testframes/prev_{:d}_{:03d}".format(j, frame_ind),agents_arr[j,:,:2])
+                #         np.save("testframes/pred_{:d}_{:03d}".format(j, frame_ind),pred)
+
+                #     if use_nn:
                         
-                        if use_pid:
-                            # Apply PID controller
+                #         if use_pid:
+                #             # Apply PID controller
 
-                            #target_vel = diffpos/dt
-                            target_vel = (pred[1]-currpos)/(2.*dt)
-                            target_speed = np.sqrt( target_vel[0]**2. + target_vel[1]**2. )
-                            next_wp = get_closest_waypoint(pred[0], map)
-                            #next_wp = CustomWaypoint(pred[0])
-                            control = controllers[j].run_step(target_speed, next_wp)
-                            npcs[j].apply_control(control)
+                #             #target_vel = diffpos/dt
+                #             target_vel = (pred[1]-currpos)/(2.*dt)
+                #             target_speed = np.sqrt( target_vel[0]**2. + target_vel[1]**2. )
+                #             next_wp = get_closest_waypoint(pred[0], map)
+                #             #next_wp = CustomWaypoint(pred[0])
+                #             control = controllers[j].run_step(target_speed, next_wp)
+                #             npcs[j].apply_control(control)
 
-                        else:
-                            # Displace directly the vehicle to the predicted position
+                #         else:
+                #             # Displace directly the vehicle to the predicted position
 
-                            nextpos =  pred[0]
+                #             nextpos =  pred[0]
 
-                            # Estimate orientation
-                            diffpos = nextpos - currpos
-                            newyaw = np.arctan2(diffpos[1], diffpos[0])*180./np.pi
+                #             # Estimate orientation
+                #             diffpos = nextpos - currpos
+                #             newyaw = np.arctan2(diffpos[1], diffpos[0])*180./np.pi
 
-                            # if np.sqrt(diffpos[0]**2.+diffpos[1]**2.)<0.01:
-                            #     continue
+                #             # if np.sqrt(diffpos[0]**2.+diffpos[1]**2.)<0.01:
+                #             #     continue
 
-                            # wp = get_closest_waypoint(nextpos, map)
-                            # nextpos = [ wp.transform.location.x, wp.transform.location.y ]
+                #             # wp = get_closest_waypoint(nextpos, map)
+                #             # nextpos = [ wp.transform.location.x, wp.transform.location.y ]
                             
-                            nextloc = carla.Location(x=nextpos[0], y=nextpos[1])
-                            nextrot = carla.Rotation(yaw=newyaw)
+                #             nextloc = carla.Location(x=nextpos[0], y=nextpos[1])
+                #             nextrot = carla.Rotation(yaw=newyaw)
 
-                            npcs[j].set_transform(carla.Transform(location=nextloc, rotation=nextrot))
+                #             npcs[j].set_transform(carla.Transform(location=nextloc, rotation=nextrot))
 
 
             world.tick()
