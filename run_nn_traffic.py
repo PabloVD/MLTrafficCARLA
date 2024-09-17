@@ -9,6 +9,7 @@ import argparse
 from rasterizer import rasterize_input
 from roadgraph import RoadGraph
 from controller import VehiclePIDController
+from rasterizer_torch import get_rotation_matrix
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -26,37 +27,37 @@ def get_closest_waypoint(pos, map):
     wp = map.get_waypoint(loc, project_to_road=True, lane_type=(carla.LaneType.Driving))
     return wp
 
-def update_agents(agents_arr, confidences, logits):
+def update_agents(agents_arr, confidences, logits, device):
 
-        # Extract batch size
-        batch_size = agents_arr.shape[0]
+    # Extract batch size
+    batch_size = agents_arr.shape[0]
 
-        arr = torch.arange(batch_size)
-        
-        # Get the index of the maximum confidence for each row in the batch
-        indmax_batch = confidences.argmax(dim=1)
-        
-        # Gather the logits based on the indices obtained from the maximum confidences
-        pred = logits[arr, indmax_batch]
-        
-        # Get current position and yaw
-        currpos = agents_arr[:,-1,:2]
-        curryaw = agents_arr[:,-1,2]*np.pi/180.
-        
-        # Calculate rotation matrix for each batch
-        rot_matrix = get_rotation_matrix(-curryaw)
-        
-        # Rotating and translating prediction
-        pred_rotated = torch.bmm(pred, rot_matrix) + currpos.unsqueeze(1)  # shape: (batch_size, 10, 2)
-        
-        # Displace directly the vehicle to the predicted position
-        nextpos = pred_rotated[:, 0]  # Take the first position from the prediction
-        
-        # Estimate orientation
-        diffpos = nextpos - currpos
-        newyaw = torch.atan2(diffpos[:, 1], diffpos[:, 0])
+    arr = torch.arange(batch_size)
+    
+    # Get the index of the maximum confidence for each row in the batch
+    indmax_batch = confidences.argmax(dim=1)
+    
+    # Gather the logits based on the indices obtained from the maximum confidences
+    pred = logits[arr, indmax_batch]
+    
+    # Get current position and yaw
+    currpos = torch.tensor(agents_arr[:,-1,:2], device=device, dtype=torch.float32)
+    curryaw = torch.tensor(agents_arr[:,-1,2], device=device, dtype=torch.float32)
+    
+    # Calculate rotation matrix for each batch
+    rot_matrix = get_rotation_matrix(-curryaw)
+    
+    # Rotating and translating prediction
+    pred_rotated = torch.bmm(pred, rot_matrix) + currpos.unsqueeze(1)  # shape: (batch_size, 10, 2)
+    
+    # Displace directly the vehicle to the predicted position
+    nextpos = pred_rotated[:, 0]  # Take the first position from the prediction
+    
+    # Estimate orientation
+    diffpos = nextpos - currpos
+    newyaw = torch.atan2(diffpos[:, 1], diffpos[:, 0])
 
-        return nextpos, newyaw
+    return nextpos, newyaw
 
 def main():
 
@@ -166,18 +167,19 @@ def main():
     # camera.listen(lambda image: image.save_to_disk('_out/%06d.png' % image.frame))
 
     # PID controllers
-    args_lateral_dict = {'K_P': 0., 'K_I': 0.05, 'K_D': 0.2, 'dt': dt}
-    args_longitudinal_dict = {'K_P': 1.0, 'K_I': 0.05, 'K_D': 0, 'dt': dt}
-    controllers = []
-    for npc in npcs:
-        vehicle_controller = VehiclePIDController(npc,
-                                                args_lateral=args_lateral_dict,
-                                                args_longitudinal=args_longitudinal_dict,
-                                                offset=0,
-                                                max_throttle=0.75,
-                                                max_brake=0.5,
-                                                max_steering=0.8)
-        controllers.append(vehicle_controller)
+    if use_pid:
+        args_lateral_dict = {'K_P': 0., 'K_I': 0.05, 'K_D': 0.2, 'dt': dt}
+        args_longitudinal_dict = {'K_P': 1.0, 'K_I': 0.05, 'K_D': 0, 'dt': dt}
+        controllers = []
+        for npc in npcs:
+            vehicle_controller = VehiclePIDController(npc,
+                                                    args_lateral=args_lateral_dict,
+                                                    args_longitudinal=args_longitudinal_dict,
+                                                    offset=0,
+                                                    max_throttle=0.75,
+                                                    max_brake=0.5,
+                                                    max_steering=0.8)
+            controllers.append(vehicle_controller)
 
     # Deactivate some layers for debugging
     map_layer_names = [
@@ -218,7 +220,7 @@ def main():
             for i, npc in enumerate(npcs):
 
                 transf = npc.get_transform()
-                agents_buffer_list[i].append([transf.location.x, transf.location.y, transf.rotation.yaw])
+                agents_buffer_list[i].append([transf.location.x, transf.location.y, transf.rotation.yaw*np.pi/180.])
                 
             # agents_arr: (N,timesteps,3)
             agents_arr = np.array(agents_buffer_list)
@@ -233,6 +235,7 @@ def main():
                     npc.set_autopilot(False)
                     control = carla.VehicleControl(steer=0., throttle=0., brake=1.0, hand_brake = False, manual_gear_shift = False)
                     npc.apply_control(control)
+
 
             if run_nn:
 
@@ -251,17 +254,18 @@ def main():
 
                 #currpos, yaw = agents_arr[:,-1,:2], agents_arr[:,-1,2]
 
-                nextpos, nextyaw = update_agents(agents_arr, confidences, logits)
+                nextpos, nextyaw = update_agents(agents_arr, confidences, logits, device)
 
                 for j in range(len(agents_arr)):
 
                     # Store data and prediction for debugging
                     if debug:
                         np.save("testframes/prev_{:d}_{:03d}".format(j, frame_ind),agents_arr[j,:,:2])
-                        np.save("testframes/pred_{:d}_{:03d}".format(j, frame_ind),pred)
+                        # np.save("testframes/pred_{:d}_{:03d}".format(j, frame_ind),pred)
 
-                    nextloc = carla.Location(x=nextpos[0], y=nextpos[1])
-                    nextrot = carla.Rotation(yaw=nextyaw)
+
+                    nextloc = carla.Location(x=nextpos[j,0].item(), y=nextpos[j,1].item())
+                    nextrot = carla.Rotation(yaw=nextyaw[j].item()*180./np.pi)
 
                     npcs[j].set_transform(carla.Transform(location=nextloc, rotation=nextrot))
 
