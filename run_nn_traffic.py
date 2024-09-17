@@ -253,8 +253,12 @@ def main():
                 # print(confidences.shape, logits.shape)
 
                 #currpos, yaw = agents_arr[:,-1,:2], agents_arr[:,-1,2]
+                # Get current position and yaw
+                currpos = torch.tensor(agents_arr[:,-1,:2], device=device, dtype=torch.float32)
+                curryaw = torch.tensor(agents_arr[:,-1,2], device=device, dtype=torch.float32)
+                nextpos, nextyaw = model.next_step(currpos, curryaw, confidences, logits)
 
-                nextpos, nextyaw = update_agents(agents_arr, confidences, logits, device)
+                # nextpos, nextyaw = update_agents(agents_arr, confidences, logits, device)
 
                 for j in range(len(agents_arr)):
 
