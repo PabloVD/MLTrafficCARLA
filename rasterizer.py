@@ -13,7 +13,7 @@ displacement = np.array([[raster_size // 4, raster_size // 2]])
 def rasterize_input(agents_arr, bb_npcs, roadnet, tl_states, n_channels, zoom_fact):
 
     XY = agents_arr[:,:,:2]
-    YAWS = agents_arr[:,:,2]*np.pi/180.
+    YAWS = agents_arr[:,:,2]
     lengths = bb_npcs[:,0]
     widths = bb_npcs[:,1]
 
