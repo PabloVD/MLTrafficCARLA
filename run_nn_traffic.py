@@ -8,8 +8,7 @@ import argparse
 
 from rasterizer import rasterize_input
 from roadgraph import RoadGraph
-from controller import VehiclePIDController
-from rasterizer_torch import get_rotation_matrix
+# from rasterizer_torch import get_rotation_matrix
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -27,38 +26,6 @@ def get_closest_waypoint(pos, map):
     wp = map.get_waypoint(loc, project_to_road=True, lane_type=(carla.LaneType.Driving))
     return wp
 
-def update_agents(agents_arr, confidences, logits, device):
-
-    # Extract batch size
-    batch_size = agents_arr.shape[0]
-
-    arr = torch.arange(batch_size)
-    
-    # Get the index of the maximum confidence for each row in the batch
-    indmax_batch = confidences.argmax(dim=1)
-    
-    # Gather the logits based on the indices obtained from the maximum confidences
-    pred = logits[arr, indmax_batch]
-    
-    # Get current position and yaw
-    currpos = torch.tensor(agents_arr[:,-1,:2], device=device, dtype=torch.float32)
-    curryaw = torch.tensor(agents_arr[:,-1,2], device=device, dtype=torch.float32)
-    
-    # Calculate rotation matrix for each batch
-    rot_matrix = get_rotation_matrix(-curryaw)
-    
-    # Rotating and translating prediction
-    pred_rotated = torch.bmm(pred, rot_matrix) + currpos.unsqueeze(1)  # shape: (batch_size, 10, 2)
-    
-    # Displace directly the vehicle to the predicted position
-    nextpos = pred_rotated[:, 0]  # Take the first position from the prediction
-    
-    # Estimate orientation
-    diffpos = nextpos - currpos
-    newyaw = torch.atan2(diffpos[:, 1], diffpos[:, 0])
-
-    return nextpos, newyaw
-
 def main():
 
     args = parse_args()
@@ -70,6 +37,17 @@ def main():
     else:
         os.system("rm "+outpath+"*")
 
+    # DEBUGGING
+    outpath2 = "rendertests/"
+    if not os.path.exists(outpath2):
+        os.system("mkdir "+outpath2)
+    else:
+        os.system("rm "+outpath2+"*")
+
+    logfile = os.getcwd()+"/logs/record.log"
+    if not os.path.exists(os.getcwd()+"/logs/"):
+        os.system("mkdir "+os.getcwd()+"/logs/")
+
     device = "cuda"
 
     # True for using NN, otherwise uses standard traffic manager
@@ -79,7 +57,7 @@ def main():
     use_pid = False
 
     # True for fixed birdview spectator, otherwise follows an agent
-    fixed_spec = True
+    fixed_spec = False#True
 
     # Number of previous timeframes taken as input
     prev_steps = 10
@@ -91,7 +69,7 @@ def main():
     dt = 0.1
 
     # True for debugging, saves some debugging files and prints more information
-    debug = True
+    debug = False#True
 
     # Number of NPCs
     num_npcs = args.npcs
@@ -111,12 +89,17 @@ def main():
 
     # Spawn npcs
     spawn_points = map.get_spawn_points()
-    blueprint_list = blueprint_library.filter("*audi*")
-    blueprint = blueprint_list[0]
+    bps = blueprint_library.filter("vehicle.*")
+    blueprint_list = [x for x in bps if x.get_attribute('base_type') == 'car']
+    # blueprint = blueprint_list[0]
     npcs = []
     for i in range(num_npcs):
         spwnpnt = spawn_points[i]
         #spwnpnt.location.x-=2
+        blueprint = np.random.choice(blueprint_list)
+        if blueprint.has_attribute('color'):
+                color = np.random.choice(blueprint.get_attribute('color').recommended_values)
+                blueprint.set_attribute('color', color)
         npc = world.try_spawn_actor(blueprint, spwnpnt)
         if not npc:
             print("npc "+str(i)+" not spawned")
@@ -166,35 +149,6 @@ def main():
     # camera = world.spawn_actor(camera_bp, carla.Transform(carla.Location(x=50)), attach_to=spectator)
     # camera.listen(lambda image: image.save_to_disk('_out/%06d.png' % image.frame))
 
-    # PID controllers
-    if use_pid:
-        args_lateral_dict = {'K_P': 0., 'K_I': 0.05, 'K_D': 0.2, 'dt': dt}
-        args_longitudinal_dict = {'K_P': 1.0, 'K_I': 0.05, 'K_D': 0, 'dt': dt}
-        controllers = []
-        for npc in npcs:
-            vehicle_controller = VehiclePIDController(npc,
-                                                    args_lateral=args_lateral_dict,
-                                                    args_longitudinal=args_longitudinal_dict,
-                                                    offset=0,
-                                                    max_throttle=0.75,
-                                                    max_brake=0.5,
-                                                    max_steering=0.8)
-            controllers.append(vehicle_controller)
-
-    # Deactivate some layers for debugging
-    map_layer_names = [
-                carla.MapLayer.Buildings,
-                carla.MapLayer.Decals,
-                carla.MapLayer.Foliage,
-                carla.MapLayer.ParkedVehicles,
-                carla.MapLayer.Props,
-                carla.MapLayer.StreetLights,
-                carla.MapLayer.Walls,
-            ]
-
-    for layer in map_layer_names:
-        world.unload_map_layer(layer)
-
     # Frame when to switch to NN traffic manager
     min_frame = 100
 
@@ -229,18 +183,30 @@ def main():
             tl_states = [ tl.get_state() for tl in traffic_lights ]
 
             if not run_nn and use_nn and agents_arr.shape[1]==prev_steps and frame_ind>min_frame:
-                print("Disabling traffic manager, switching to neural traffic")
+                print("Disabling traffic manager, switching to neural traffic at frame "+str(frame_ind))
                 run_nn = True
                 for npc in npcs:
                     npc.set_autopilot(False)
                     control = carla.VehicleControl(steer=0., throttle=0., brake=1.0, hand_brake = False, manual_gear_shift = False)
                     npc.apply_control(control)
+                client.start_recorder(logfile)
+
+            # DEBUGGING
+            # if frame_ind>10:
+            #     raster = rasterize_input(agents_arr, bb_npcs, roadnet, tl_states, prev_steps, zoom_fact)
+            #     raster = torch.tensor(raster, device=device, dtype=torch.float32)
+            #     np.save(outpath2+"batch_torch"+str(frame_ind),raster[0].cpu().detach().numpy())
 
 
             if run_nn:
 
+                if frame_ind>10:
+                    raster = rasterize_input(agents_arr, bb_npcs, roadnet, tl_states, prev_steps, zoom_fact)
+                    raster = torch.tensor(raster, device=device, dtype=torch.float32)
+                #     # np.save(outpath2+"batch_torch"+str(frame_ind),raster[0].cpu().detach().numpy())
+
                 # raster: (N,channels,rastersize,rastersize)
-                raster = rasterize_input(agents_arr, bb_npcs, roadnet, tl_states, prev_steps, zoom_fact)
+                # raster = rasterize_input(agents_arr, bb_npcs, roadnet, tl_states, prev_steps, zoom_fact)
                 if debug:
                     np.save("testframes/test_"+str(frame_ind),raster[0])
                     # np.save("testframes/allagents_"+str(frame_ind),raster)
@@ -249,7 +215,8 @@ def main():
                 
                 # Run model
                 raster = torch.tensor(raster, device=device, dtype=torch.float32)
-                confidences, logits  = model(raster)
+                # np.save(outpath2+"batch_torch"+str(frame_ind)+"_time_"+str(0),raster[0].cpu().detach().numpy())
+                confidences, logits = model(raster)
                 # print(confidences.shape, logits.shape)
 
                 #currpos, yaw = agents_arr[:,-1,:2], agents_arr[:,-1,2]
@@ -257,8 +224,6 @@ def main():
                 currpos = torch.tensor(agents_arr[:,-1,:2], device=device, dtype=torch.float32)
                 curryaw = torch.tensor(agents_arr[:,-1,2], device=device, dtype=torch.float32)
                 nextpos, nextyaw = model.next_step(currpos, curryaw, confidences, logits)
-
-                # nextpos, nextyaw = update_agents(agents_arr, confidences, logits, device)
 
                 for j in range(len(agents_arr)):
 
@@ -270,65 +235,9 @@ def main():
 
                     nextloc = carla.Location(x=nextpos[j,0].item(), y=nextpos[j,1].item())
                     nextrot = carla.Rotation(yaw=nextyaw[j].item()*180./np.pi)
+                    # nextrot = carla.Rotation(yaw=curryaw[j].item()*180./np.pi)
 
                     npcs[j].set_transform(carla.Transform(location=nextloc, rotation=nextrot))
-
-                
-                # # TO DO improve with array multiplication
-                # for j in range(len(agents_arr)):
-
-                #     indmax = confidences[j].argmax()
-                #     # sortedtens, indices = torch.sort(confidences[j])
-                #     # indmax = indices[-2]
-
-                #     pred = logits[j,indmax].detach().cpu().numpy()
-
-                #     currpos, yaw = agents_arr[j,-1,:2], agents_arr[j,-1,2]*np.pi/180.
-
-                #     rot_matrix = np.array([
-                #         [np.cos(-yaw), -np.sin(-yaw)],
-                #         [np.sin(-yaw), np.cos(-yaw)],
-                #     ])
-                
-                #     pred = pred@rot_matrix + currpos 
-
-                #     # Store data and prediction for debugging
-                #     if debug:
-                #         np.save("testframes/prev_{:d}_{:03d}".format(j, frame_ind),agents_arr[j,:,:2])
-                #         np.save("testframes/pred_{:d}_{:03d}".format(j, frame_ind),pred)
-
-                #     if use_nn:
-                        
-                #         if use_pid:
-                #             # Apply PID controller
-
-                #             #target_vel = diffpos/dt
-                #             target_vel = (pred[1]-currpos)/(2.*dt)
-                #             target_speed = np.sqrt( target_vel[0]**2. + target_vel[1]**2. )
-                #             next_wp = get_closest_waypoint(pred[0], map)
-                #             #next_wp = CustomWaypoint(pred[0])
-                #             control = controllers[j].run_step(target_speed, next_wp)
-                #             npcs[j].apply_control(control)
-
-                #         else:
-                #             # Displace directly the vehicle to the predicted position
-
-                #             nextpos =  pred[0]
-
-                #             # Estimate orientation
-                #             diffpos = nextpos - currpos
-                #             newyaw = np.arctan2(diffpos[1], diffpos[0])*180./np.pi
-
-                #             # if np.sqrt(diffpos[0]**2.+diffpos[1]**2.)<0.01:
-                #             #     continue
-
-                #             # wp = get_closest_waypoint(nextpos, map)
-                #             # nextpos = [ wp.transform.location.x, wp.transform.location.y ]
-                            
-                #             nextloc = carla.Location(x=nextpos[0], y=nextpos[1])
-                #             nextrot = carla.Rotation(yaw=newyaw)
-
-                #             npcs[j].set_transform(carla.Transform(location=nextloc, rotation=nextrot))
 
 
             world.tick()
@@ -338,6 +247,11 @@ def main():
         vehicles = world.get_actors().filter('vehicle.*')
         for vehicle in vehicles:
             vehicle.destroy()
+        
+        client.stop_recorder()
+
+        world.tick()
+        print("Done")
 
 
 if __name__=="__main__":

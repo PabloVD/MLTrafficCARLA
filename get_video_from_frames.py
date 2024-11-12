@@ -4,24 +4,39 @@
 
 from moviepy.video.io import ImageSequenceClip
 import glob
-import os
 from natsort import natsorted
+import argparse
 
-#inpath = "testimages"
-inpath = "trajectories/"
+def argument_parser():
 
-# Frame rate (Hz)
-fps = 10
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument(
+        '--images',
+        default='out',
+        help='Folder where frames are stored')
+    argparser.add_argument(
+        '--video',
+        default="video",
+        type=str,
+        help='Name of the output video')
+    argparser.add_argument(
+        '--fps',
+        default=10,
+        type=int,
+        help='FPS')
+    
+    return argparser.parse_args()
 
-def get_video():
+args = argument_parser()
 
-    # Get all frames in folder
-    image_files = natsorted(glob.glob(inpath+"im_*"))
+image_folder = args.images
+video_name = args.video+'.mp4'
+fps=args.fps
 
-    # Create video and save
-    clip = ImageSequenceClip.ImageSequenceClip(image_files, fps=fps)
-    clip.write_videofile("video.mp4")
+# Get all frames in folder
+image_files = natsorted(glob.glob(image_folder+"/*.png"))
+image_files = image_files[:-1]
 
-
-get_video()
-
+# Create video and save
+clip = ImageSequenceClip.ImageSequenceClip(image_files, fps=fps)
+clip.write_videofile(video_name)

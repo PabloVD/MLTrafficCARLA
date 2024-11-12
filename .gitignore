@@ -7,3 +7,7 @@ trajectories_tm/
 models/
 allagents/
 trajectories_best/
+cameraout/
+logs/
+videos/
+other/
